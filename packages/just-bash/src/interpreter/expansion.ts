@@ -252,9 +252,10 @@ export async function expandWordForPattern(
   for (const part of word.parts) {
     if (part.type === "Escaped") {
       // For escaped characters that are pattern metacharacters, preserve the backslash
-      // This includes: ( ) | * ? [ ] for glob/extglob patterns
+      // This includes: ( ) | * ? [ ] for glob/extglob patterns, and the backslash
+      // itself, so that an escaped backslash matches a backslash
       const ch = part.value;
-      if ("()|*?[]".includes(ch)) {
+      if ("()|*?[]\\".includes(ch)) {
         parts.push(`\\${ch}`);
       } else {
         parts.push(ch);
