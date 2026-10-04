@@ -57,6 +57,18 @@ describe("adjacent double-quoted segments are parsed on their own", () => {
     expect(result.stdout).toBe("m1\nn2\nm3\nm4\nn5\n");
   });
 
+  it.each([
+    ['echo $"a""b"', "ab\n"],
+    ['echo $"a"b', "ab\n"],
+    ["echo $\"a\"'b'", "ab\n"],
+    ['echo $"$x""_y"', "AB_y\n"],
+    ['echo $"$x"_y', "AB_y\n"],
+    ['echo $"a b""c"', "a bc\n"],
+  ])("keeps a locale-quoted word together with what follows it: %s", async (command, stdout) => {
+    const result = await run(`a=V; x=AB; ${command}`);
+    expect(result).toMatchObject({ stdout, stderr: "", exitCode: 0 });
+  });
+
   it("handles empty adjacent segments", async () => {
     const result = await run(
       `x=AB; echo ""$x""; echo """"; echo """a"; echo "a"""; printf '[%s]' "$x""" """$x"; echo`,

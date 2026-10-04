@@ -1810,7 +1810,8 @@ export class Lexer {
     // We already preserved the quotes in the main loop when hasContentAfterQuote became true,
     // but the opening quote was not preserved initially. We need to prepend it.
     if (hasContentAfterQuote && startsWithQuote) {
-      const openQuote = input[start];
+      // A locale-quoted word ($"...") skipped its $, so what was opened is a double quote
+      const openQuote = input[start] === "$" ? '"' : input[start];
       value = openQuote + value;
       quoted = false;
       singleQuoted = false;
