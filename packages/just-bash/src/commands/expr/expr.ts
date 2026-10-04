@@ -65,15 +65,30 @@ function evaluateExpr(
   // Handle string operations: :, match, substr, index, length
 
   let i = 0;
+  // Greater than 0 while parsing an operand that is not evaluated: the right
+  // side of a `|` whose left side is true, or of a `&` whose left side is false.
+  // It is still parsed, so a syntax error in it is reported, but nothing in it
+  // is computed, so it cannot fail (e.g. `1 | 1 / 0` is 1).
+  let skipping = 0;
+
+  function parseSkipping(skip: boolean, parse: () => string): string {
+    if (skip) skipping++;
+    try {
+      return parse();
+    } finally {
+      if (skip) skipping--;
+    }
+  }
 
   function parseOr(): string {
     let left = parseAnd();
     while (i < args.length && args[i] === "|") {
       i++;
-      const right = parseAnd();
       // OR: returns left if non-zero/non-empty, else right. The right side
       // is always parsed, so the rest of a chain like `a | b | c` is consumed.
-      if (left === "0" || left === "") {
+      const leftIsTrue = left !== "0" && left !== "";
+      const right = parseSkipping(leftIsTrue, parseAnd);
+      if (!leftIsTrue) {
         left = right;
       }
     }
@@ -84,9 +99,10 @@ function evaluateExpr(
     let left = parseComparison();
     while (i < args.length && args[i] === "&") {
       i++;
-      const right = parseComparison();
       // AND: returns left if both non-zero/non-empty, else 0
-      if (left === "0" || left === "" || right === "0" || right === "") {
+      const leftIsFalse = left === "0" || left === "";
+      const right = parseSkipping(leftIsFalse, parseComparison);
+      if (leftIsFalse || right === "0" || right === "") {
         left = "0";
       }
       // keep left as is if both are truthy
@@ -134,6 +150,10 @@ function evaluateExpr(
       if (op === "+" || op === "-") {
         i++;
         const right = parseMulDiv();
+        if (skipping > 0) {
+          left = "0";
+          continue;
+        }
         const leftNum = parseInt(left, 10);
         const rightNum = parseInt(right, 10);
         if (Number.isNaN(leftNum) || Number.isNaN(rightNum)) {
@@ -154,6 +174,10 @@ function evaluateExpr(
       if (op === "*" || op === "/" || op === "%") {
         i++;
         const right = parseMatch();
+        if (skipping > 0) {
+          left = "0";
+          continue;
+        }
         const leftNum = parseInt(left, 10);
         const rightNum = parseInt(right, 10);
         if (Number.isNaN(leftNum) || Number.isNaN(rightNum)) {
@@ -181,6 +205,10 @@ function evaluateExpr(
     while (i < args.length && args[i] === ":") {
       i++;
       const pattern = parsePrimary();
+      if (skipping > 0) {
+        left = "0";
+        continue;
+      }
       // Match from beginning of string
       const regex = createUserRegex(`^${pattern}`);
       const match = regex.match(left);
@@ -207,6 +235,9 @@ function evaluateExpr(
       i++;
       const str = parsePrimary();
       const pattern = parsePrimary();
+      if (skipping > 0) {
+        return "0";
+      }
       const regex = createUserRegex(pattern);
       const match = regex.match(str);
       if (match) {
@@ -220,6 +251,9 @@ function evaluateExpr(
       const str = parsePrimary();
       const pos = parseInt(parsePrimary(), 10);
       const len = parseInt(parsePrimary(), 10);
+      if (skipping > 0) {
+        return "";
+      }
       if (Number.isNaN(pos) || Number.isNaN(len)) {
         throw new Error("non-integer argument");
       }
@@ -231,6 +265,9 @@ function evaluateExpr(
       i++;
       const str = parsePrimary();
       const chars = parsePrimary();
+      if (skipping > 0) {
+        return "0";
+      }
       // Build membership once. Calling chars.includes() for every input code
       // unit is quadratic when both operands are attacker controlled.
       consumeWork(chars.length + str.length);
