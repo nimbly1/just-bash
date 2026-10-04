@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Bash } from "../Bash.js";
+import { ExecutionLimitError } from "./errors.js";
 
 async function run(script: string) {
   return new Bash().exec(script);
@@ -68,6 +69,28 @@ describe("case patterns keep escaped and quoted characters literal", () => {
       stderr: "",
       exitCode: 0,
     });
+  });
+
+  it("bounds a pattern built from several expansions by maxStringLength", async () => {
+    // each expansion fits in the limit, but the pattern made of three of them does not
+    const bash = new Bash({ executionLimits: { maxStringLength: 40 } });
+    const result = await bash.exec(
+      "a=xxxxxxxxxxxxxxxxxxxx; case x in $a$a$a) echo match;; *) echo no;; esac",
+    );
+
+    expect(result.exitCode).toBe(ExecutionLimitError.EXIT_CODE);
+    expect(result.stderr).toContain("word expansion");
+  });
+
+  it("bounds the right-hand side of [[ == ]] by maxStringLength", async () => {
+    const bash = new Bash({ executionLimits: { maxStringLength: 40 } });
+    const result = await bash.exec(
+      "a=xxxxxxxxxxxxxxxxxxxx; [[ x == $a$a$a ]] && echo match || echo no",
+    );
+
+    // the conditional reports the error and counts as false, so the || branch runs
+    expect(result.stdout).toBe("no\n");
+    expect(result.stderr).toContain("string length limit exceeded (40 bytes)");
   });
 
   it("keeps ordinary glob patterns working", async () => {

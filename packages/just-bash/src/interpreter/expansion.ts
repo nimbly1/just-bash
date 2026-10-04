@@ -93,12 +93,12 @@ import {
 } from "./helpers/ifs.js";
 import { isNameref, resolveNameref } from "./helpers/nameref.js";
 import { recordSubstitutionExit } from "./helpers/substitution-status.js";
-import { getLiteralValue, isQuotedPart } from "./helpers/word-parts.js";
+import { getLiteralValue } from "./helpers/word-parts.js";
 import { openProcessSubstitution } from "./process-substitution.js";
 import type { InterpreterContext } from "./types.js";
 
 // Re-export extracted functions for use elsewhere
-export { escapeGlobChars, escapeRegexChars } from "./expansion/glob-escape.js";
+export { escapeRegexChars } from "./expansion/glob-escape.js";
 // Re-export for backward compatibility
 export {
   getArrayElements,
@@ -126,33 +126,6 @@ async function expandWordPartsAsync(
     results.push(value);
   }
   return results.join("");
-}
-
-/**
- * Check if a word is "fully quoted" - meaning glob characters should be treated literally.
- * A word is fully quoted if all its parts are either:
- * - SingleQuoted
- * - DoubleQuoted (entirely quoted variable expansion like "$pat")
- * - Escaped characters
- */
-function isPartFullyQuoted(part: WordPart): boolean {
-  return isQuotedPart(part);
-}
-
-/**
- * Check if an entire word is fully quoted
- */
-export function isWordFullyQuoted(word: WordNode): boolean {
-  // Empty word is considered quoted (matches empty pattern literally)
-  if (word.parts.length === 0) return true;
-
-  // Check if we have any unquoted parts with actual content
-  for (const part of word.parts) {
-    if (!isPartFullyQuoted(part)) {
-      return false;
-    }
-  }
-  return true;
 }
 
 /**
@@ -272,7 +245,9 @@ export async function expandWordForPattern(
       parts.push(await expandPart(ctx, part));
     }
   }
-  return parts.join("");
+  const result = parts.join("");
+  checkStringLength(result, ctx.limits.maxStringLength, "word expansion");
+  return result;
 }
 
 /**
