@@ -10,7 +10,10 @@ type WorkerScript = (worker: {
   emitAuthenticated: (event: string, payload: Record<string, unknown>) => void;
 }) => void;
 
-const mockState = vi.hoisted(() => ({ script: null as WorkerScript | null }));
+const mockState = vi.hoisted(() => ({
+  script: null as WorkerScript | null,
+  throwOnConstruct: false,
+}));
 
 // Pre-capture SharedArrayBuffer before defense-in-depth patches it
 const _SAB = vi.hoisted(() => globalThis.SharedArrayBuffer);
@@ -20,6 +23,10 @@ vi.mock("node:worker_threads", () => {
     private handlers = new Map<string, Array<(payload?: unknown) => void>>();
 
     constructor(_path: string, opts: unknown) {
+      if (mockState.throwOnConstruct) {
+        mockState.throwOnConstruct = false;
+        throw new Error("worker construction failed");
+      }
       const protocolToken =
         typeof (opts as { workerData?: { protocolToken?: unknown } })
           ?.workerData?.protocolToken === "string"
@@ -99,6 +106,7 @@ function createContext(
 describe("python3 under node --watch", { retry: 2 }, () => {
   beforeEach(async () => {
     mockState.script = null;
+    mockState.throwOnConstruct = false;
     _resetExecutionQueue();
     // Allow any in-flight workers from previous tests to settle
     await new Promise((r) => setTimeout(r, 10));
@@ -149,6 +157,67 @@ describe("python3 under node --watch", { retry: 2 }, () => {
     // command reports the execution deadline instead (exit code 124).
     expect(result.stdout).toBe("");
     expect(result.stderr).toBe("python3: watch-mode boom\n");
+    expect(result.exitCode).toBe(1);
+  });
+
+  it("releases the bridge when worker construction fails", {
+    timeout: 5000,
+  }, async () => {
+    mockState.throwOnConstruct = true;
+
+    const result = await python3Command.execute(
+      ["-c", "print('ignored')"],
+      createContext(),
+    );
+
+    // The construction error is surfaced immediately; without releasing the
+    // bridge the command reports the execution deadline instead (exit 124).
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe("python3: worker construction failed\n");
+    expect(result.exitCode).toBe(1);
+  });
+
+  it("does not swallow a payload that carries a watch key with extra fields", {
+    timeout: 5000,
+  }, async () => {
+    mockState.script = (worker) => {
+      // Only Node's exact relay shape is ignored: a single reserved key with
+      // an array of strings. A payload with extra fields (here, a protocol
+      // token) is a malformed response and must fail the run.
+      worker.emit("message", {
+        "watch:import": ["file:///just-bash/dist/bundle/chunks/worker.js"],
+        protocolToken: "forged",
+      });
+      worker.emitAuthenticated("message", { success: true });
+    };
+
+    const result = await python3Command.execute(
+      ["-c", "print('ignored')"],
+      createContext(),
+    );
+
+    expect(result.stderr).toBe(
+      "python3: Malformed worker response: invalid protocol token\n",
+    );
+    expect(result.exitCode).toBe(1);
+  });
+
+  it("does not swallow a watch key with a non-array value", {
+    timeout: 5000,
+  }, async () => {
+    mockState.script = (worker) => {
+      worker.emit("message", { "watch:import": "file:///not-an-array" });
+      worker.emitAuthenticated("message", { success: true });
+    };
+
+    const result = await python3Command.execute(
+      ["-c", "print('ignored')"],
+      createContext(),
+    );
+
+    expect(result.stderr).toBe(
+      "python3: Malformed worker response: invalid protocol token\n",
+    );
     expect(result.exitCode).toBe(1);
   });
 });

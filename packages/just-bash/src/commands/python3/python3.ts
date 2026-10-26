@@ -307,6 +307,9 @@ function processNextExecution(queueState: QueueState): void {
       success: false,
       error: sanitizeHostErrorMessage(message),
     });
+    // The bridge loop is running for this entry; release it so the command
+    // returns the construction error instead of waiting for the deadline.
+    next.stopBridge();
     if (queueState.activeExecution === next) {
       queueState.activeExecution = null;
       processNextExecution(queueState);
@@ -378,12 +381,6 @@ function processNextExecution(queueState: QueueState): void {
     "python3",
     "worker message callback",
     (msg: unknown) => {
-      // Node's --watch mode relays module dependencies from the worker as
-      // "watch:import"/"watch:require" messages; they are not command
-      // responses, so ignore them instead of failing the run.
-      if (isNodeWatchModeMessage(msg)) {
-        return;
-      }
       try {
         next.controller.assertMessageSize(msg, "response");
       } catch (error) {
@@ -394,6 +391,13 @@ function processNextExecution(queueState: QueueState): void {
           },
           true,
         );
+        return;
+      }
+      // Node's --watch mode relays module dependencies from the worker as
+      // "watch:import"/"watch:require" messages; they are not command
+      // responses, so ignore them instead of failing the run. This runs
+      // after size validation so nothing bypasses the message limits.
+      if (isNodeWatchModeMessage(msg)) {
         return;
       }
       void settleActiveExecution(
