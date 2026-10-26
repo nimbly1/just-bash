@@ -30,6 +30,7 @@ import type {
 } from "../../types.js";
 import { hasHelpFlag, showHelp } from "../help.js";
 import { BridgeHandler } from "../worker-bridge/bridge-handler.js";
+import { isNodeWatchModeMessage } from "../worker-bridge/node-watch-message.js";
 import { createSharedBuffer } from "../worker-bridge/protocol.js";
 import { WorkerRequestController } from "../worker-request-controller.js";
 import type { WorkerInput, WorkerOutput } from "./worker.js";
@@ -340,6 +341,10 @@ function processNextExecution(queueState: QueueState): void {
     next.state = "terminating";
     cleanupListeners();
     next.settle(result);
+    // The settled run may never reach a bridge EXIT operation (the worker
+    // failed before its first bridge operation, or it is being terminated);
+    // release the bridge loop instead of waiting for the execution deadline.
+    next.stopBridge();
 
     if (terminateWorker) {
       const acknowledged = await next.controller.terminate(worker);
@@ -373,6 +378,12 @@ function processNextExecution(queueState: QueueState): void {
     "python3",
     "worker message callback",
     (msg: unknown) => {
+      // Node's --watch mode relays module dependencies from the worker as
+      // "watch:import"/"watch:require" messages; they are not command
+      // responses, so ignore them instead of failing the run.
+      if (isNodeWatchModeMessage(msg)) {
+        return;
+      }
       try {
         next.controller.assertMessageSize(msg, "response");
       } catch (error) {

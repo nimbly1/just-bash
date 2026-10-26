@@ -32,6 +32,7 @@ import type {
   RuntimeCommandContext,
 } from "../../types.js";
 import { hasHelpFlag, showHelp } from "../help.js";
+import { isNodeWatchModeMessage } from "../worker-bridge/node-watch-message.js";
 import { WorkerRequestController } from "../worker-request-controller.js";
 
 import {
@@ -612,6 +613,12 @@ async function executeInWorker(
         "sqlite3",
         "worker message callback",
         (result: unknown) => {
+          // Node's --watch mode relays module dependencies from the worker as
+          // "watch:import"/"watch:require" messages; they are not command
+          // responses, so ignore them instead of failing the run.
+          if (isNodeWatchModeMessage(result)) {
+            return;
+          }
           try {
             const response =
               result && typeof result === "object"
