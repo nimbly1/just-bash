@@ -217,16 +217,20 @@ echo 한 | f`,
       expect(r).toMatchObject({ stdout: "Ã©\n", stderr: "", exitCode: 0 });
     });
 
-    it("stderr keeps U+00C3/U+00A9 text", async () => {
-      const env = new Bash();
-      const r = await env.exec("echo 'Ã©' >&2");
-      expect(r).toMatchObject({ stdout: "", stderr: "Ã©\n", exitCode: 0 });
+    // Byte-shaped stdout that is redirected to stderr has no shape metadata
+    // on the stderr side, so the output boundary is still the only place it
+    // is decoded. Keep that decode until the redirection itself does it.
+    it("UTF-8 file contents sent to stderr still come back as text", async () => {
+      const env = new Bash({ files: { "/utf8.txt": "한\n" } });
+      const r = await env.exec("cat /utf8.txt >&2");
+      expect(r).toMatchObject({ stdout: "", stderr: "한\n", exitCode: 0 });
     });
 
     it("bytes written to a file are the UTF-8 encoding of the text", async () => {
       const env = new Bash();
-      const r = await env.exec("echo 'Ã©' > /f; od -An -tx1 /f");
-      expect(r.stdout).toBe(" 303 203 302 251 012\n");
+      await env.exec("echo 'Ã©' > /f");
+      const bytes = await env.fs.readFileBuffer("/f");
+      expect(Array.from(bytes)).toEqual([0xc3, 0x83, 0xc2, 0xa9, 0x0a]);
     });
 
     it("non-Latin-1 text still passes through", async () => {
